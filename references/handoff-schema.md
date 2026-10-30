@@ -4,7 +4,9 @@
 
 ## 本地任务批次
 
-以运行代理的当前会话目录作为任务根目录。目标工作区和修改范围默认是该目录及其子目录，并受实际权限、项目规则和用户约束限制。相对于此根目录解析工作区及允许/排除路径；`allowed_paths` 中的目录条目包含其子目录。`artifacts` 和 `history` 中的路径相对于批次目录解析。
+以运行代理的当前会话目录作为任务根目录。目标工作区和修改范围默认是该目录及其子目录，并受实际权限、项目规则和用户约束限制。相对于此根目录解析工作区、`bundle`、`acp_source.original_path` 及允许/排除路径；`allowed_paths` 中的目录条目包含其子目录。`artifacts`、`history`、`acp_source.copied_path` 及提示词中的 ACP 快照路径相对于批次目录解析，不随提示词所在目录改变。
+
+例如，首轮实施提示词和 `iterations/002/repair-prompt.md` 都使用 `input/acp-plan.md`，解析为 `<task-root>/<bundle>/input/acp-plan.md`。ACP 原始方案则通过 `<task-root>/<acp_source.original_path>` 定位。
 
 仅为新任务创建新批次：`pir/YYYY-MM-DD-NNN-task-slug/`，使用用户的本地日期和该日期下一个未使用的序号。不得覆盖现有批次。优先选择明确指定的批次，其次是已核验的对话关联批次，最后是唯一匹配的未完成批次。存在多个匹配时先澄清；不得按最新日期推断任务身份。跨代理和日期接续同一任务时，保持使用同一批次。
 
@@ -111,6 +113,34 @@ artifacts:
 
 `status` 必须是 `PLANNED`、`IMPLEMENTING`、`REVIEWING`、`CHANGES_REQUESTED`、`APPROVED` 或 `BLOCKED` 之一。
 
+评审结束和阻塞时使用以下组合：
+
+| 事件 | phase | status | next_action / blocker |
+|---|---|---|---|
+| 评审通过，任务结束 | `REVIEWING` | `APPROVED` | 两者均为 null；保留实际生成的评审报告路径 |
+| 评审要求修复，已分配下一轮 | `ITERATING` | `CHANGES_REQUESTED` | next_action 指向下一轮修复 |
+| 任意阶段阻塞 | 保留发生阻塞时的阶段 | `BLOCKED` | blocker 记录原因，next_action 记录解除条件及恢复动作 |
+
+成功结束时的状态字段示例（不是完整的 state.yaml）：
+
+```yaml
+phase: REVIEWING
+status: APPROVED
+next_action: null
+blocker: null
+```
+
+实施阶段阻塞时的状态字段示例：
+
+```yaml
+phase: IMPLEMENTING
+status: BLOCKED
+next_action: "补齐缺失的源文件后，重新核验工作区并继续本轮实施"
+blocker: "实施提示词指定的源文件缺失"
+```
+
+`APPROVED` 仅与 `REVIEWING` 搭配，表示评审已结束；仅要求“继续”时不再分配实施。阻塞不增加迭代，也不创建新批次；解除后核验输入及工作区，再恢复相应阶段和状态，并清除已解除的 blocker。
+
 验证规划来源时，使用以下组合：
 
 | 条件 | phase | status | 提示词 |
@@ -186,11 +216,13 @@ artifacts:
 -
 ```
 
+独立的实施和修复提示词必须从 `Prompt status` 行开始保存；标题、注释和空行都在其后。下面的代码块可作为独立文件内容复制。
+
 ```markdown
+Prompt status: READY
+
 # 实施提示词
 <!-- 保存为 implementation-prompt.md。内容必须自包含。 -->
-
-Prompt status: READY
 <!-- 缺少必要输入或核验门槛未满足时，将 READY 替换为 NOT_READY。 -->
 
 你是任务 `<task_id>` 第 `<iteration>` 轮的实施者。
@@ -201,7 +233,7 @@ Prompt status: READY
 
 ### 规划来源
 - 来源：PIR 自行规划或 ACP 接入
-- ACP 输入（适用时）：`input/acp-plan.md`
+- ACP 输入（适用时，相对于批次目录）：`input/acp-plan.md`
 - ACP 来源 phase/status、摘要、决策负责人确认及核验限制：
 
 ### 工作区与基线
@@ -306,11 +338,16 @@ APPROVED | CHANGES_REQUESTED | BLOCKED
 -
 
 ## 下一步行动
+```
 
 ## 修复提示词
-<!-- 遇到 CHANGES_REQUESTED 时，还要将这份自包含提示词保存到 iterations/<next_iteration>/repair-prompt.md。 -->
 
+遇到 `CHANGES_REQUESTED` 时，将下面代码块的完整内容另存为 `iterations/<next_iteration>/repair-prompt.md`，不复制评审报告的标题或本节标题。第一行保持为 `Prompt status: READY`；尚不具备修复条件时使用 `NOT_READY`，并将批次设为 `ITERATING / BLOCKED`，记录解除条件及恢复动作。
+
+```markdown
 Prompt status: READY
+
+# 修复提示词
 <!-- 无法安全执行本次修复时，将 READY 替换为 NOT_READY。 -->
 
 你是任务 `<task_id>` 第 `<next_iteration>` 轮的实施者。
@@ -321,7 +358,7 @@ Prompt status: READY
 
 ### 规划来源
 - 来源：PIR 自行规划或 ACP 接入
-- ACP 输入（适用时）：`../../input/acp-plan.md`
+- ACP 输入（适用时，相对于批次目录）：`input/acp-plan.md`
 - ACP 来源 phase/status、摘要、决策负责人确认及核验限制：
 
 ### 工作区与基线
@@ -331,7 +368,7 @@ Prompt status: READY
 - 预期当前版本和已有源文件修改：
 - 初始未提交文件及归属：
 
-在本地核验当前任务。保留此前的实施修改；原始基线是历史证据，不是重置目标。修复报告和评审输出使用本批次的 iterations/<next_iteration>/ 目录。
+在本地核验当前任务。ACP 输入路径按批次根目录解析，不按本提示词所在目录解析。保留此前的实施修改；原始基线是历史证据，不是重置目标。修复报告和评审输出使用本批次的 iterations/<next_iteration>/ 目录。
 
 ### 允许和排除路径
 - 允许：

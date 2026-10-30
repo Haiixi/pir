@@ -36,7 +36,7 @@ description: 通过生成自包含的实施提示词、基于证据的结果报�
 
 实施、评审和修复轮次都需要一个可识别的现有批次；不能因为原任务包缺失就创建替代任务。如果找不到任务包，报告缺失的输入。跨代理、阶段变化及后续日期都保持相同的 `task_id` 和批次。将修复轮次文档放在该批次的 `iterations/002/`、`iterations/003/` 等目录下。
 
-工作区路径以任务根目录为基准，产物路径以批次目录为基准。交给另一个代理或另一台机器时，在该代理的当前任务根目录下解析相同的相对任务包路径，然后核验任务身份、源文件和预期基线。不得将发送方的绝对路径当作接收方的工作区。目录无关或任务包缺失属于需要解决的不匹配，不能因此另建批次。
+工作区路径、`bundle` 和 `acp_source.original_path` 以任务根目录为基准；`artifacts`、`history`、`acp_source.copied_path` 及提示词中的 ACP 快照路径以批次目录为基准。即使提示词位于 `iterations/002/` 等子目录，`input/acp-plan.md` 仍从批次根目录解析，不按提示词所在目录解析。交给另一个代理或另一台机器时，在该代理的当前任务根目录下解析相同的相对任务包路径，然后核验任务身份、源文件和预期基线。不得将发送方的绝对路径当作接收方的工作区。目录无关或任务包缺失属于需要解决的不匹配，不能因此另建批次。
 
 ## 选择阶段
 
@@ -104,7 +104,11 @@ ACP 来源属于输入产物，不是第二个活动的 PIR 批次。PIR 创建�
 
 如果缺失的源产物、目标组件、行为契约或验证目标会实质改变工作，停在 PLANNING 或 BLOCKED。在所选本地批次中输出规划阻塞包，包含已核验上下文和 NOT_READY 实施提示词；不得将未经核验的猜测变成可直接执行的实施指令。当前目录默认值已能确定任务时，仅省略路径本身不构成阻塞。
 
-然后将 `plan.md`、`implementation-prompt.md` 和 `state.yaml` 保存到批次中。`implementation-prompt.md` 的第一行必须是 `Prompt status: READY` 或 `Prompt status: NOT_READY`。只有 `Prompt status: READY` 可以与 `phase: READY_FOR_IMPLEMENTATION` 和 `status: PLANNED` 搭配；`NOT_READY` 提示词必须让批次保持在 `PLANNING`/`BLOCKED`，并将实施/评审报告路径保持为 null。**实施提示词**必须让代理 B 无需访问代理 A 的隐藏上下文即可执行。包含任务 ID、规划来源、适用时的 ACP 来源摘要/状态、相对批次路径、目标、背景、工作区映射、基线、允许和排除路径、约束、准确的验收标准、预期验证和完整的结果报告格式。明确要求编辑前阅读适用的项目规则，并报告未运行的测试。不得在实施或评审阶段开始前创建相应报告；报告生成前，其状态文件中的路径保持为 null。
+然后将 `plan.md`、`implementation-prompt.md` 和 `state.yaml` 保存到批次中。`implementation-prompt.md` 和独立保存的 `repair-prompt.md` 的第一行必须是 `Prompt status: READY` 或 `Prompt status: NOT_READY`，标题、注释和空行都放在该行之后。
+
+首次规划只有 `Prompt status: READY` 可以与 `phase: READY_FOR_IMPLEMENTATION` 和 `status: PLANNED` 搭配；首次实施提示词为 `NOT_READY` 时，批次保持在 `PLANNING / BLOCKED`，实施/评审报告路径保持为 null。修复提示词为 `NOT_READY` 时，保留 `ITERATING` 阶段并使用 `status: BLOCKED`，记录恢复动作，不进入实施。
+
+**实施提示词**必须让代理 B 无需访问代理 A 的隐藏上下文即可执行。包含任务 ID、规划来源、适用时的 ACP 来源摘要/状态、相对批次路径、目标、背景、工作区映射、基线、允许和排除路径、约束、准确的验收标准、预期验证和完整的结果报告格式。明确要求编辑前阅读适用的项目规则，并报告未运行的测试。不得在实施或评审阶段开始前创建相应报告；报告生成前，其状态文件中的路径保持为 null。
 
 ## 实施模式
 
@@ -151,7 +155,7 @@ ACP 来源属于输入产物，不是第二个活动的 PIR 批次。PIR 创建�
 
 规划 -> 实施 -> 评审循环可以运行任意多轮。保持相同的 `task_id`，每次 `CHANGES_REQUESTED` 评审后增加 `iteration`。开始修复轮次时，不得丢弃原始目标、约束、验收标准、基线或范围。
 
-每个修复轮次都必须生成新的自包含修复提示词、新的实施报告和新的评审报告。只有评审者返回 `APPROVED` 或 `BLOCKED` 时循环才结束；不得仅因为代理 B 报告完成，就在首次实施后停止。
+每个修复轮次都必须生成新的自包含修复提示词、新的实施报告和新的评审报告。评审者返回 `APPROVED` 时任务成功结束；任意阶段进入 `BLOCKED` 时暂停，待阻塞解除后从记录的位置恢复。不得仅因为代理 B 报告完成，就在首次实施后宣称任务通过。
 
 保持原始方案和首次实施提示词不变，将后续产物保存在 `iterations/<nnn>/` 下。状态文件必须指向当前轮次，并在历史记录中保留先前报告。将当前轮次尚未生成的报告路径重置为 null，避免把上一轮报告误当成新结果。切换阶段、代理或日期不会分配新任务批次，也不会增加迭代编号。
 
@@ -182,14 +186,23 @@ APPROVED
 BLOCKED
 ```
 
-常规转换如下：
+常规阶段推进如下，箭头中的值均为 phase：
 
 ```text
 NEW -> PLANNING -> READY_FOR_IMPLEMENTATION -> IMPLEMENTING
-    -> READY_FOR_REVIEW -> REVIEWING -> APPROVED
-                                      -> ITERATING (status CHANGES_REQUESTED)
-                                      -> IMPLEMENTING
+    -> READY_FOR_REVIEW -> REVIEWING
+ITERATING -> IMPLEMENTING -> READY_FOR_REVIEW -> REVIEWING
 ```
+
+评审结果与阻塞状态按以下组合保存，不增加新的阶段枚举：
+
+| 事件 | phase / status | 状态要求 |
+|---|---|---|
+| 评审通过，任务成功结束 | `REVIEWING / APPROVED` | 保留已生成的评审报告路径；`next_action: null`、`blocker: null`；不增加迭代 |
+| 评审要求修复，已分配下一轮 | `ITERATING / CHANGES_REQUESTED` | `next_action` 指向下一轮修复；按多轮规则增加一次迭代 |
+| 任意阶段发生阻塞，暂停推进 | `发生阻塞时的 phase / BLOCKED` | 保留阶段和迭代，填写 `blocker` 及 `next_action` 中的解除条件和恢复动作 |
+
+`APPROVED` 仅与 `phase: REVIEWING` 搭配；这个组合表示评审已经结束。对于仅要求“继续”的已批准批次，核验后报告已完成，不重新进入实施。`BLOCKED` 不是 phase，也不表示任务完成；解除阻塞后，重新核验输入和工作区，再按恢复动作设置相应的阶段和状态，并清除已解除的 `blocker`。
 
 规划来源状态规则：
 
@@ -198,7 +211,7 @@ NEW -> PLANNING -> READY_FOR_IMPLEMENTATION -> IMPLEMENTING
 | 自行制定的有效方案，或已核验工作区基线的规范 ACP 方案 | `READY_FOR_IMPLEMENTATION / PLANNED` | `Prompt status: READY` |
 | 明确指定的 ACP 输入缺失、不完整、不可读、不匹配、不是 `COMPLETE`，或存在摘要/基线冲突 | `PLANNING / BLOCKED` | `Prompt status: NOT_READY`；实施和评审报告路径保持为 null |
 | 此前阻塞的 ACP 来源已完整并通过核验 | 复用同一个 PIR 批次；保持同一实施迭代 | 在历史记录中保留阻塞项，然后重新生成方案和提示词 |
-| 实施或修复时发现 ACP 快照、来源状态或已记录摘要发生变化 | `BLOCKED` | 编辑前停止；不得悄悄吸收该变化 |
+| 实施或修复时发现 ACP 快照、来源状态或已记录摘要发生变化 | `当前 phase / BLOCKED` | 编辑前停止；不得悄悄吸收该变化 |
 
 任何阶段中，如果推进需要外部输入或当前不可用的能力，都使用 BLOCKED。记录阻塞项、缺失输入和准确的恢复位置。至少保留 `task_id`、`bundle`、`phase`、`status`、`iteration`、`planning_source`（`PIR` 或 `ACP`）、`objective`、`workspace`（相对根目录、原始基线和当前源文件状态）、`allowed_paths`、`constraints`、`acceptance_criteria`、`artifacts`、`history` 和 `next_action`。ACP 接入还需保留 `acp_source`（原始相对路径、复制的输入路径、来源 phase/status、SHA-256 摘要、来源任务 ID、决策负责人确认及核验限制）。参考文档定义了这些字段的结构。
 

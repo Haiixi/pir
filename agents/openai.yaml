@@ -1,0 +1,4 @@
+interface:
+  display_name: "pir"
+  short_description: "根据用户请求或 ACP 方案规划任务，再按批次实施并评审结果"
+  default_prompt: "使用 $pir 处理当前任务；如提供 ACP 合并方案则先核验并生成 implementation-prompt.md，否则自行规划，再按批次实施和评审。"
